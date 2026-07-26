@@ -527,6 +527,51 @@ describe.sequential("agent permission routes", () => {
     });
   }, 20_000);
 
+  it("masks adapterConfig secrets on /agents/:id self-view, matching /agents/me (RIP-1313)", async () => {
+    // GET /agents/:id must not let an agent bypass the /agents/me masking
+    // simply by requesting its own id through the other route.
+    mockAgentService.getById.mockResolvedValue({
+      ...baseAgent,
+      adapterType: "openclaw_gateway",
+      adapterConfig: {
+        url: "wss://gateway.example.test",
+        agentId: "builder",
+        sessionKey: "builder-session",
+        timeoutSec: 600,
+        password: "plaintext-password-secret",
+        authToken: "plaintext-auth-token-secret",
+        devicePrivateKeyPem: "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----\n",
+        headers: { "x-openclaw-token": "plaintext-openclaw-token-secret" },
+      },
+      runtimeConfig: {
+        heartbeat: { enabled: true, intervalSec: 3600 },
+      },
+    });
+
+    const app = await createApp({
+      type: "agent",
+      agentId,
+      companyId,
+      source: "agent_key",
+      runId: "run-1",
+    });
+
+    const res = await requestApp(app, (baseUrl) => request(baseUrl).get(`/api/agents/${agentId}`));
+
+    expect(res.status).toBe(200);
+    expect(res.body.adapterConfig.password).not.toBe("plaintext-password-secret");
+    expect(res.body.adapterConfig.authToken).not.toBe("plaintext-auth-token-secret");
+    expect(res.body.adapterConfig.devicePrivateKeyPem).not.toContain("BEGIN PRIVATE KEY");
+    expect(res.body.adapterConfig.headers["x-openclaw-token"]).not.toBe("plaintext-openclaw-token-secret");
+    expect(res.body.adapterConfig.url).toBe("wss://gateway.example.test");
+    expect(res.body.adapterConfig.agentId).toBe("builder");
+    expect(res.body.adapterConfig.sessionKey).toBe("builder-session");
+    expect(res.body.adapterConfig.timeoutSec).toBe(600);
+    expect(res.body.runtimeConfig).toMatchObject({
+      heartbeat: { enabled: true, intervalSec: 3600 },
+    });
+  }, 20_000);
+
   it("redacts adapterConfig on /companies/:companyId/agents list for callers with canCreateAgents (RIP-1315)", async () => {
     // Even callers with canCreateAgents (which implies canReadConfigs) must
     // not see plaintext secrets on the company agents list endpoint. The

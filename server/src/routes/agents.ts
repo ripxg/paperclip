@@ -2247,7 +2247,10 @@ export function agentRoutes(
       res.json(await buildAgentDetail(agent, { restricted: true }));
       return;
     }
-    res.json(await buildAgentDetail(agent));
+    // RIP-1313: keep /agents/:id's self-view consistent with /agents/me — an
+    // agent must not see its own plaintext secrets here either, or the
+    // /agents/me masking is trivially bypassed by hitting this route instead.
+    res.json(await buildAgentDetail(agent, isSelf ? { self: true } : undefined));
   });
 
   router.get("/agents/:id/configuration", async (req, res) => {
